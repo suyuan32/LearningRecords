@@ -106,3 +106,9 @@
 - rand需要对整个表进行排序，性能差
 - 建议使用total查询整个表的行数以后使用 limit n, 1的方式获取随机值
 </details>
+
+<details>
+<summary> </summary>
+ 
+ 
+</details>
