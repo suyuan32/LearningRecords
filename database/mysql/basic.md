@@ -33,6 +33,10 @@
 <summary>什么情况下索引会失效 </summary>
 
 - like 关键词前面不加 %， 左模糊
+- 对字段进行函数操作例如加减乘除
+- 字符串和数字比较
+- 隐式字符串编码转换
+![pic](./pic/avoid_index_unavailable.png)
 
 </details>
 
@@ -108,7 +112,168 @@
 </details>
 
 <details>
-<summary> </summary>
+<summary> 最左前缀匹配最左边没了怎么办？哪两种方法 </summary>
  
+ - 索引下推， 减少回表次数 （mysql5.6+）
+ - 松散索引扫描，先跟据主索引找到每个值是否有对应的值，速度会加快 （mysql8+）
+</details>
+
+<details>
+<summary> 分页怎么优化 </summary>
+ 
+ - 在索引没有覆盖的情况下先跟据有索引的键找到主id再回表查询
+</details>
+
+<details>
+<summary> 什么是binlog </summary>
+ 
+ - binlog是server层产生的逻辑日志
+ - 用于数据的复制及传输
+ - binlog完整记录了数据库的每次操作，可用于数据闪回（回滚）
+</details>
+
+<details>
+<summary>什么是undolog  </summary>
+ 
+ - undolog 又称 回滚日志， 用于 Innodb中，用于事务的回滚和展示旧操作
+ - 对于任何数据和缓存的更新都要 先写undolog
+ - undolog 位于表空间里的undo segment 中
+
+</details>
+
+<details>
+<summary> 什么是redolog </summary>
+ 
+ - redolog是innodb的物理日志，记录数据页的变化
+ - innodb日志优于数据，数据写入redolog表示数据已经更新
+ - 内存中的数据被更新后写入redolog中，写入磁盘后redolog会被删除
+ - redolog默认是4个文件每个1g, 循环写入， 当write pos 追上 check pos时需要等待check pos推进才能继续，只要redolog不丢数据就不会丢
+</details>
+
+<details>
+<summary> 什么是redolog刷盘？为什么这么做？  </summary>
+ 
+ - 因为数据在修改后redolog和undolog还是暂存于内存中的，如果此时突然断电还是会导致数据丢失
+ - 通过修改参数 innodb_flush_log_at_trx_commit 参数控制刷盘速度
+ 0  -- 异步每秒刷盘  1 -- 每一个事务刷盘  N -- 每 N 个事务刷盘  
+ - 建议设为 1 
+</details>
+
+<details>
+<summary> 什么是binlog刷盘 </summary>
+ 
+ - 使用 sync_binlog 参数控制 binlog 刷盘
+ - 0 自动控制刷盘
+ - 1 一个事务刷盘
+ - N N 个事务刷盘
+</details>
+
+<details>
+<summary> redolog刷盘崩溃会导致什么问题？ </summary>
+ 
+ - redolog 刷盘前崩溃的话会导致 数据丢失
+ - redolog 刷盘后崩溃的话重启时系统会对 redolog 进行重放，重写binlog
+</details>
+
+<details>
+<summary> 为什么 redolog 在 binlog前 </summary>
+ 
+ - redolog相当于决断点
+ - binlog一旦写入就会传到子数据库，难以撤销，redolog属于中转
+</details>
+
+<details>
+<summary> 数据库锁有哪几种？ </summary>
+ 
+ - 按照粒度分可分为 全局锁，表级锁， 行级锁
+ - 全局锁会锁住左右表，整个库无法修改
+ - 表级锁分为表锁（数据锁）和元数据锁
+ - 行锁会锁住数据行，分为共享锁和独占锁
+</details>
+
+<details>
+<summary> 什么是全局锁 </summary>
+ 
+ - FTWRL （ flush tables with read lock）
+ - 此命令使整个库处于只读状态
+ - 主要用途是保证备份的一致性
+ - 不要随意使用，杀伤性极大，要在备份数剧库时再用
+</details>
+
+<details>
+<summary> 什么是表锁（数据锁）和元数据锁 </summary>
+ 
+- 命令 lock tables XXX read / write
+- 表锁也是非常重的锁，用的也少
+
+- 元数据锁 matadata lock 
+- 元数据指的是表的结构，字段，数据类型，索引等
+- 事务访问数据时会自动给表加MDL锁
+- 事务修改元数据时会自动给表加MDL写锁
+</details>
+
+<details>
+<summary> 什么是行锁？ </summary>
+ 
+ - 行锁有两种类型，有多种叫法
+    + 读锁 / 写锁
+    + 共享锁/ 排他锁
+    + 共享锁 / 独占锁
+    + S 锁 / X 锁
+ - S锁不是不让读而是自己要读不让别人写
+ - X锁不只是不让写，而是要自己写不让别人读写
+ - 只有S和S锁可以兼容
+</details>
+
+<details>
+<summary> 事务的特性 </summary>
+ - 原子性 
+    - 事务操作要么全部成功要不全部失败
+    - 两阶段提交保证了事务的原子性
+    - undolog用于撤销操作
+ - 一致性
+    - 事务必须使数据库从一个一致性状态变化到另一个一致性状态
+    - 锁和两阶段提交保证了一致性
+- 隔离性
+    - 事务不能被其他事务操作数据所干扰
+    - 多个并发事务之间要相互隔离
+    - 锁和undolog保证了事务的隔离性
+- 持久性
+    - 一个事务一旦被提交改变将永久保存
+    - redolog保证了事务的持久性
+</details>
+
+<details>
+<summary> 隔离级别 </summary>
+ 
+ - 读未提交 （ read uncommitted)
+    - 读写都不加锁，不隔离
+    - 每次查询都查到数据的最新版本
+    - 性能最好但是等于没有事务， 很少采用
+ - 读提交 (read committed)
+    - 一般读取时，读取此时已经提交的数据
+    - 写数据时加 X锁， 提交时释放
+    - Oracle数剧库默认隔离级别
+ - 可重复读 (repeatable-read)
+    - 一般读取是，读取本事务开始时的数据状态
+    - 写数据时，加X锁，提交时释放
+    - Mysql数据库的默认隔离级别
+ - 串行化 (serializable)
+    - 读加S锁， 写加X锁， 提交时释放
+    - 对于一条数据，同时只能有一个事务进行写操作
+    - 事务隔离性最高性能太差，很少采用
  
 </details>
+
+<details>
+<summary> MVCC如何实现版本控制 </summary>
+ 
+- 行记录的版本控制
+    - 由于 undolog的存在，可以从最新版本推算之前的版本
+- 快照读 （一致性非锁定读）
+    - 不锁定数据的情况下，读取数据特定的历史版本
+    - 版本有事务的具体需求确定：
+        - 读已提交： 跟据每次select时，其他事务的提交情况
+        - 可持续读： 跟据事务开始时
+</details>
+ 
