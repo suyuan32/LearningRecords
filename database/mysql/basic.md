@@ -246,10 +246,12 @@
 <details>
 <summary> 隔离级别 </summary>
  
+   所有隔离级别都不允许脏写，也就是两个事务同时写同一条数据
  - 读未提交 （ read uncommitted)
     - 读写都不加锁，不隔离
     - 每次查询都查到数据的最新版本
     - 性能最好但是等于没有事务， 很少采用
+    - read uncommitted 读不加锁，写加排他锁，并到事务结束之后释放
  - 读提交 (read committed)
     - 一般读取时，读取此时已经提交的数据
     - 写数据时加 X锁， 提交时释放
@@ -274,6 +276,113 @@
     - 不锁定数据的情况下，读取数据特定的历史版本
     - 版本有事务的具体需求确定：
         - 读已提交： 跟据每次select时，其他事务的提交情况
-        - 可持续读： 跟据事务开始时
+        - 可持续读： 跟据事务开始时的id，读取数据特定的历史版本
+- 当前读 （一致性锁定读）
+   - 读取数据的当前版本，并加锁
+   - 若当前版本已被加锁，则阻塞等待
 </details>
  
+<details>
+<summary> Next-key Lock加锁逻辑 </summary>
+ 
+ - 加锁是以Next-Key为基本单位
+ - 查找过程在扫描过的范围才加锁
+ - 唯一索引等值查询，没有间隙锁，只加行锁
+ - 索引等值查询最右一个扫描到的不满足条件值不加行锁
+ - 索引覆盖且只加S锁时，不锁主键索引
+
+ - 等值查询间隙锁
+ - 非唯一索引等值锁
+ - 主键索引范围锁
+ - 非唯一索引范围锁
+ - 非索引字段查询
+   - 锁全表
+</details>
+
+<details>
+<summary> 为什么要刷脏 </summary>
+ 
+- 内存中的脏页太多，内存不足
+- redolog 写满，需要推进check point
+- 系统空闲，提前刷脏，预防上述情况
+- Mysql关闭前，保存数据 
+- 前两中会造成性能问题，需要预防
+</details>
+
+<details>
+<summary> 如何避免被迫刷脏？ </summary>
+ 
+ - 正确告知innodb，服务器的硬盘性能
+   - ![](./pic/server_io_config.png)
+ - 合理配置脏页比例上限
+ ![](./pic/dirty_page_config.png)
+ - 控制”顺便刷脏“策略
+ ![](./pic/flush_neighbors.png)
+</details>
+
+<details>
+<summary> 如何解决死锁？ </summary>
+ 
+-  长事务的危害
+   - 锁无法释放
+      - 行级锁长时间无法释放，导致其他事务等待
+         - 当前读会对数据加锁，事务提交前无法释放
+         - 其他事务更新相同数据时会等待锁，造成更新性能差
+            - 调整 Innodb_lock_wait_timeout参数
+      - 容易产生死锁
+         - 长事务的锁长时间不释放，容易与其他事务产生死锁
+         - 死锁指的是两个事务都依赖对方的锁释放
+         - 解决方法
+            - 主动死锁检测 innodb_deadlock_detect
+            - 发现死锁时回滚代价较小的事务
+            - 主动死锁检测默认开启
+      - MDL锁hold住大量事务导致MYSQL崩溃
+ 
+</details>
+
+<details>
+<summary> 什么是MDL锁？ </summary>
+ 
+ - 事务访问数据时会自动给表加MDL读锁
+ - 事务修改元数据时，会自动给表加MDL写锁
+ - 遇到锁不兼容时，申请MDL锁的事务会形成一个队列
+
+ - 解决方法
+   - alter table前查看是否有长事务还未提交
+   - 查看长事务： information_schema库innodb_trx表
+</details>
+
+<details>
+<summary> 如何查看影响性能的锁 </summary>
+ 
+![](./pic/browse_lock_impact.png)
+![](./pic/browse_lock_impact_mysql_8.png)
+</details>
+
+<details>
+<summary> 数据库常用备份 </summary>
+ 
+ - mysqldump  
+ - xtraBackup
+</details>
+
+<details>
+<summary> mysqldump增量备份思路 </summary>
+ 
+ - binlog忠实记录了Mysql数据的变化
+ - mysqldump全量备份后可以用binlog作为增量
+ - mysqldump全量备份是，切换新的binlog
+ - 从零还原时，采用全量还原+binlog还原
+![](./pic/mysqldump_flush_log.png)
+![](./pic/mysqldump_flush_log_2.png)
+![](./pic/mysqldump_flush_log_3.png)
+</details>
+
+<details>
+<summary> 如何减少数据库上线问题？</summary>
+ 
+ - 最小权限原则，收缩权限
+ - 使用自动或手动的手段审计SQL语句
+ - 删表前伪删除，再使用自动工具删表
+ - 完善上线和运维流程
+</details>
